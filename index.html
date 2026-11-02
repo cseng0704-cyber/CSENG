@@ -32,6 +32,10 @@ const CONFIG = {
   // 상세창에서 숨길 열
   HIDE_COLS: ['위도', '경도', '주소정확도'],
   AUTO_REFRESH_MIN: 10,
+  // 지역 묶음: '대표주소'의 시·도를 읽어 자동 분류. 아래 순서대로 목록에 표시
+  REGION_ORDER: ['서울','인천','경기','강원','충북','충남','대전','세종','전북','전남','광주','경북','경남','대구','부산','울산','제주'],
+  // 광역시를 도에 합쳐 보고 싶으면 예: { '부산':'경남', '울산':'경남', '대전':'충남' }
+  REGION_MERGE: {},
 };
 </script>
 <style>
@@ -56,7 +60,14 @@ aside{border-right:1px solid var(--line);background:var(--panel);display:flex;fl
 .chip .dot{width:9px;height:9px;border-radius:50%}
 .chip.off{opacity:.38}
 .chip b{font-weight:600}
-#q{margin:4px 14px 10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px}
+.tools{display:flex;gap:8px;margin:4px 14px 10px}
+#q{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px}
+#region{flex:0 0 auto;max-width:130px;padding:8px 6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px}
+.grp{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:6px;padding:7px 14px;background:var(--chip);border-bottom:1px solid var(--line);
+  font-size:13px;font-weight:700;cursor:pointer;user-select:none}
+.grp .cnt{color:var(--sub);font-weight:600}
+.grp .chev{margin-left:auto;color:var(--sub);font-size:11px;transition:transform .15s}
+.grp.closed .chev{transform:rotate(-90deg)}
 #list{overflow:auto;flex:1;border-top:1px solid var(--line)}
 .item{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:start}
 .item:hover,.item.sel{background:var(--chip)}
@@ -107,7 +118,10 @@ aside{border-right:1px solid var(--line);background:var(--panel);display:flex;fl
   <aside id="side">
     <button id="toggle" type="button" aria-label="목록 접기/펼치기"></button>
     <div class="filters" id="filters"></div>
-    <input id="q" type="search" placeholder="현장명·지역·발주처 검색">
+    <div class="tools">
+      <input id="q" type="search" placeholder="현장명·번호·발주처 검색">
+      <select id="region" aria-label="지역 선택"></select>
+    </div>
     <div id="list"></div>
   </aside>
   <div id="mapwrap">
@@ -124,6 +138,7 @@ const OTHER = { key: '기타', color: '#8B8D98' };
 let map, geocoder, places, rows = [], headers = [], overlays = [], hqOverlay = null;
 let active = new Set(CONFIG.STATUS.map(s => s.key).concat(OTHER.key));
 let selected = -1;
+const closed = new Set();
 
 document.title = CONFIG.TITLE;
 $('#title').textContent = CONFIG.TITLE;
@@ -189,6 +204,14 @@ async function geocode(addr){
   return null;
 }
 
+const SIDO = [['서울','서울'],['인천','인천'],['경기','경기'],['강원','강원'],['충청북','충북'],['충북','충북'],['충청남','충남'],['충남','충남'],
+  ['대전','대전'],['세종','세종'],['전라북','전북'],['전북','전북'],['전라남','전남'],['전남','전남'],['광주광역','광주'],['경상북','경북'],['경북','경북'],
+  ['경상남','경남'],['경남','경남'],['대구','대구'],['부산','부산'],['울산','울산'],['제주','제주']];
+function sidoOf(t){ t = (t||'').trim(); for(const [k,v] of SIDO) if(t.startsWith(k)) return v; return ''; }
+function regionOf(o){
+  let r = sidoOf((o[C.address]||'').trim().split(/\s+/)[0]) || sidoOf(o['지역']) || '미분류';
+  return CONFIG.REGION_MERGE[r] || r;
+}
 function statusOf(v){ v = (v||'').trim(); return CONFIG.STATUS.find(s => s.key === v) || OTHER; }
 
 // ---------- 데이터 불러오기 ----------
@@ -208,7 +231,12 @@ async function load(){
   if(idx(C.name) < 0){ msg('시트 1행에 "' + C.name + '" 열이 없습니다.'); return; }
   rows = data.slice(1).map(r => { const o = {}; headers.forEach((h,i) => o[h] = (r[i]||'').trim()); return o; })
              .filter(o => o[C.name]);
+  const stIdx = o => { const k = CONFIG.STATUS.findIndex(s => s.key === (o[C.status]||'').trim()); return k < 0 ? 99 : k; };
+  const rgIdx = r => { const k = CONFIG.REGION_ORDER.indexOf(r); return k < 0 ? 99 : k; };
+  rows.forEach((o, i) => { o._i = i; o._region = regionOf(o); });
+  rows.sort((a, b) => rgIdx(a._region) - rgIdx(b._region) || stIdx(a) - stIdx(b) || a._i - b._i);
   rows.forEach((o, i) => { o._no = (o[C.no] || '').trim() || String(i + 1); });
+  selected = -1; $('#detail').style.display = 'none';
   let done = 0, fail = 0;
   for(const o of rows){
     const la = parseFloat(o[C.lat]), ln = parseFloat(o[C.lng]);
@@ -226,6 +254,7 @@ async function load(){
 function visible(o){
   const q = $('#q').value.trim().toLowerCase();
   if(!active.has(statusOf(o[C.status]).key)) return false;
+  const rg = $('#region').value; if(rg && o._region !== rg) return false;
   if(!q) return true;
   return Object.values(o).some(v => typeof v === 'string' && v.toLowerCase().includes(q));
 }
@@ -246,19 +275,38 @@ function draw(fit){
   // 목록 + 핀
   const list = $('#list'); list.innerHTML = '';
   const bounds = new kakao.maps.LatLngBounds(); let any = false;
+  // 지역 선택 상자
+  const rsel = $('#region'), keep = rsel.value, rc = {};
+  rows.forEach(o => { rc[o._region] = (rc[o._region]||0) + 1; });
+  rsel.innerHTML = '<option value="">전체 지역</option>' + Object.keys(rc)
+    .map(r => '<option value="'+esc(r)+'">'+esc(r)+' ('+rc[r]+')</option>').join('');
+  rsel.value = rc[keep] ? keep : '';
+  const vis = rows.map(visible), gc = {};
+  rows.forEach((o, i) => { if(vis[i]) gc[o._region] = (gc[o._region]||0) + 1; });
+  let lastRg = null;
   rows.forEach((o, i) => {
-    if(!visible(o)) return;
+    if(!vis[i]) return;
     const s = statusOf(o[C.status]);
+    if(o._region !== lastRg){
+      lastRg = o._region;
+      const g = document.createElement('div');
+      g.className = 'grp' + (closed.has(lastRg) ? ' closed' : '');
+      g.innerHTML = '<span></span><span class="cnt"></span><span class="chev">▼</span>';
+      g.firstChild.textContent = lastRg; g.children[1].textContent = gc[lastRg];
+      const rg = lastRg;
+      g.onclick = () => { closed.has(rg) ? closed.delete(rg) : closed.add(rg); draw(false); };
+      list.appendChild(g);
+    }
     const it = document.createElement('div');
     it.className = 'item' + (i === selected ? ' sel' : '');
-    const meta = [o['지역'], o['발주처'], o[C.status]].filter(Boolean).join(' · ');
+    const meta = [o['발주처'], o[C.status]].filter(Boolean).join(' · ');
     it.innerHTML = '<span class="num" style="background:'+s.color+'"></span><div class="nm"></div><div class="meta"></div>';
     it.querySelector('.num').textContent = o._no;
     it.querySelector('.nm').textContent = o[C.name];
     it.querySelector('.meta').textContent = meta;
     if(!o._pos){ const w = document.createElement('div'); w.className='meta warn'; w.textContent='⚠ 위치를 찾지 못함 – 주소나 위도/경도 확인'; it.appendChild(w); }
     it.onclick = () => select(i, true);
-    list.appendChild(it);
+    if(!closed.has(o._region)) list.appendChild(it);
     if(o._pos){
       const pos = new kakao.maps.LatLng(o._pos.lat, o._pos.lng);
       const pin = document.createElement('div');
@@ -308,6 +356,7 @@ function init(){
   geocoder = new kakao.maps.services.Geocoder();
   places = new kakao.maps.services.Places();
   $('#q').addEventListener('input', () => draw(false));
+  $('#region').addEventListener('change', () => draw(true));
   $('#refresh').onclick = load;
   $('#toggle').onclick = () => $('#side').classList.toggle('min');
   load();
