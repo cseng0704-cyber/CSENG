@@ -17,7 +17,8 @@ const CONFIG = {
   TITLE: '(유)씨에스이엔지 현장 지도',
   SHEET_CSV_URL: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSH1I_gDlHsccOsM_gzXwGx4zrbxvrwN9PYDuO2dwfzu8UDPoxa5t4F9KitJ1-gclpR_MXpEZ4nQjv2/pub?output=csv',
   // 시트 열 이름 (시트 1행 제목과 같아야 함)
-  COL: { name: '현장명', status: '구분', address: '대표주소', lat: '위도', lng: '경도' },
+  COL: { name: '현장명', status: '구분', address: '대표주소', lat: '위도', lng: '경도', no: '번호' },
+  // 번호: 시트에 '번호' 열이 있으면 그 값을, 없으면 시트 순서대로 1,2,3… 자동 부여
   // 상태별 색상 (시트 '구분' 열 값과 같아야 함). 목록에 없는 값은 회색으로 표시
   STATUS: [
     { key: '시공중', color: '#E5484D' },
@@ -57,7 +58,7 @@ aside{border-right:1px solid var(--line);background:var(--panel);display:flex;fl
 .chip b{font-weight:600}
 #q{margin:4px 14px 10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:14px}
 #list{overflow:auto;flex:1;border-top:1px solid var(--line)}
-.item{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;display:grid;grid-template-columns:10px 1fr;gap:4px 10px}
+.item{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:start}
 .item:hover,.item.sel{background:var(--chip)}
 .item .dot{width:10px;height:10px;border-radius:50%;margin-top:5px}
 .item .nm{font-size:14px;font-weight:600;line-height:1.35}
@@ -67,8 +68,10 @@ aside{border-right:1px solid var(--line);background:var(--panel);display:flex;fl
 #map{position:absolute;inset:0}
 #msg{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);
   border-radius:8px;padding:8px 12px;font-size:13px;box-shadow:0 2px 10px rgba(0,0,0,.12);z-index:5;display:none;max-width:90%}
-.pin{width:18px;height:18px;border-radius:50%;border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);cursor:pointer;transform:translate(0,0)}
-.pin.sel{width:24px;height:24px}
+.pin{min-width:22px;height:22px;padding:0 4px;border-radius:11px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;line-height:1;text-shadow:0 0 2px rgba(0,0,0,.35);font-variant-numeric:tabular-nums}
+.pin.sel{min-width:30px;height:30px;border-radius:15px;font-size:13px;border-width:3px}
+.num{min-width:22px;height:22px;padding:0 4px;border-radius:11px;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;text-shadow:0 0 2px rgba(0,0,0,.35);font-variant-numeric:tabular-nums}
 .hq{background:#1c2024;color:#fff;font-size:12px;font-weight:700;padding:3px 7px;border-radius:6px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
 #detail{position:absolute;right:14px;top:14px;width:340px;max-height:calc(100% - 28px);overflow:auto;background:var(--panel);
   border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.18);z-index:6;display:none}
@@ -205,6 +208,7 @@ async function load(){
   if(idx(C.name) < 0){ msg('시트 1행에 "' + C.name + '" 열이 없습니다.'); return; }
   rows = data.slice(1).map(r => { const o = {}; headers.forEach((h,i) => o[h] = (r[i]||'').trim()); return o; })
              .filter(o => o[C.name]);
+  rows.forEach((o, i) => { o._no = (o[C.no] || '').trim() || String(i + 1); });
   let done = 0, fail = 0;
   for(const o of rows){
     const la = parseFloat(o[C.lat]), ln = parseFloat(o[C.lng]);
@@ -248,7 +252,8 @@ function draw(fit){
     const it = document.createElement('div');
     it.className = 'item' + (i === selected ? ' sel' : '');
     const meta = [o['지역'], o['발주처'], o[C.status]].filter(Boolean).join(' · ');
-    it.innerHTML = '<span class="dot" style="background:'+s.color+'"></span><div class="nm"></div><div class="meta"></div>';
+    it.innerHTML = '<span class="num" style="background:'+s.color+'"></span><div class="nm"></div><div class="meta"></div>';
+    it.querySelector('.num').textContent = o._no;
     it.querySelector('.nm').textContent = o[C.name];
     it.querySelector('.meta').textContent = meta;
     if(!o._pos){ const w = document.createElement('div'); w.className='meta warn'; w.textContent='⚠ 위치를 찾지 못함 – 주소나 위도/경도 확인'; it.appendChild(w); }
@@ -258,7 +263,7 @@ function draw(fit){
       const pos = new kakao.maps.LatLng(o._pos.lat, o._pos.lng);
       const pin = document.createElement('div');
       pin.className = 'pin' + (i === selected ? ' sel' : '');
-      pin.style.background = s.color; pin.title = o[C.name];
+      pin.style.background = s.color; pin.title = o._no + '. ' + o[C.name]; pin.textContent = o._no;
       pin.onclick = () => select(i, false);
       const ov = new kakao.maps.CustomOverlay({ position: pos, content: pin, xAnchor: .5, yAnchor: .5, zIndex: i === selected ? 3 : 1 });
       ov.setMap(map); overlays.push(ov);
@@ -278,9 +283,9 @@ function select(i, pan){
   draw(false);
   if(o._pos){ const p = new kakao.maps.LatLng(o._pos.lat, o._pos.lng); if(pan){ if(map.getLevel() > 9) map.setLevel(9); map.panTo(p); } }
   const d = $('#detail');
-  let html = '<button class="x" type="button" aria-label="닫기">×</button><div class="hd"><span class="badge" style="background:'+s.color+'">'+esc(o[C.status]||'미지정')+'</span><h2>'+esc(o[C.name])+'</h2></div><dl>';
+  let html = '<button class="x" type="button" aria-label="닫기">×</button><div class="hd"><span class="badge" style="background:'+s.color+'">'+esc(o[C.status]||'미지정')+'</span><h2>'+esc(o._no)+'. '+esc(o[C.name])+'</h2></div><dl>';
   headers.forEach(h => {
-    if(h === C.name || h === C.status || CONFIG.HIDE_COLS.includes(h) || !o[h]) return;
+    if(h === C.name || h === C.status || h === C.no || CONFIG.HIDE_COLS.includes(h) || !o[h]) return;
     html += '<dt>'+esc(h)+'</dt><dd>'+esc(o[h])+'</dd>';
   });
   html += '</dl>';
