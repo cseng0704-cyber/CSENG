@@ -35,7 +35,9 @@ const CONFIG = {
   // 지역 묶음: '대표주소'의 시·도를 읽어 자동 분류. 아래 순서대로 목록에 표시
   REGION_ORDER: ['서울','인천','경기','강원','충북','충남','대전','세종','전북','전남','광주','경북','경남','대구','부산','울산','제주'],
   // 광역시를 도에 합쳐 보고 싶으면 예: { '부산':'경남', '울산':'경남', '대전':'충남' }
-  REGION_MERGE: {},
+  REGION_MERGE: { '부산':'경남', '울산':'경남' },
+  // 주소에 이 글자가 들어 있으면 지정한 지역으로 분류 (시·도보다 우선)
+  REGION_BY_ADDRESS: { '하남시': '서울' },
 };
 </script>
 <style>
@@ -209,7 +211,9 @@ const SIDO = [['서울','서울'],['인천','인천'],['경기','경기'],['강�
   ['경상남','경남'],['경남','경남'],['대구','대구'],['부산','부산'],['울산','울산'],['제주','제주']];
 function sidoOf(t){ t = (t||'').trim(); for(const [k,v] of SIDO) if(t.startsWith(k)) return v; return ''; }
 function regionOf(o){
-  let r = sidoOf((o[C.address]||'').trim().split(/\s+/)[0]) || sidoOf(o['지역']) || '미분류';
+  const addr = (o[C.address]||'').trim();
+  for(const k in CONFIG.REGION_BY_ADDRESS) if(addr.includes(k)) return CONFIG.REGION_BY_ADDRESS[k];
+  let r = sidoOf(addr.split(/\s+/)[0]) || sidoOf(o['지역']) || '미분류';
   return CONFIG.REGION_MERGE[r] || r;
 }
 function statusOf(v){ v = (v||'').trim(); return CONFIG.STATUS.find(s => s.key === v) || OTHER; }
