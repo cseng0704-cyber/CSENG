@@ -32,6 +32,8 @@ const CONFIG = {
   // 상세창에서 숨길 열
   HIDE_COLS: ['위도', '경도', '주소정확도'],
   AUTO_REFRESH_MIN: 10,
+  // 지도를 이 단계 이하로 확대하면 모든 핀 옆에 현장명 표시 (카카오 지도 레벨: 숫자가 작을수록 확대, 전국 보기 ≈ 12~13)
+  LABEL_ZOOM_LEVEL: 9,
   // 지역 묶음: '대표주소'의 시·도를 읽어 자동 분류. 아래 순서대로 목록에 표시
   REGION_ORDER: ['서울','인천','경기','강원','충북','충남','대전','세종','전북','전남','광주','경북','경남','대구','부산','울산','제주'],
   // 광역시를 도에 합쳐 보고 싶으면 예: { '부산':'경남', '울산':'경남', '대전':'충남' }
@@ -85,6 +87,10 @@ aside{border-right:1px solid var(--line);background:var(--panel);display:flex;fl
   display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;line-height:1;text-shadow:0 0 2px rgba(0,0,0,.35);font-variant-numeric:tabular-nums}
 .pin.sel{min-width:30px;height:30px;border-radius:15px;font-size:13px;border-width:3px}
 .num{min-width:22px;height:22px;padding:0 4px;border-radius:11px;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;text-shadow:0 0 2px rgba(0,0,0,.35);font-variant-numeric:tabular-nums}
+.plabel{margin-left:20px;max-width:240px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;
+  padding:5px 9px;font-size:12px;font-weight:600;line-height:1.35;box-shadow:0 2px 8px rgba(0,0,0,.22);white-space:normal;word-break:keep-all;pointer-events:none}
+.plabel b{margin-right:4px}
+.plabel.small{max-width:170px;padding:3px 7px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.95}
 .hq{background:#1c2024;color:#fff;font-size:12px;font-weight:700;padding:3px 7px;border-radius:6px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
 #detail{position:absolute;right:14px;top:14px;width:340px;max-height:calc(100% - 28px);overflow:auto;background:var(--panel);
   border:1px solid var(--line);border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.18);z-index:6;display:none}
@@ -319,6 +325,12 @@ function draw(fit){
       pin.onclick = () => select(i, false);
       const ov = new kakao.maps.CustomOverlay({ position: pos, content: pin, xAnchor: .5, yAnchor: .5, zIndex: i === selected ? 3 : 1 });
       ov.setMap(map); overlays.push(ov);
+      if(i === selected || zoomLabels()){
+        const lb = document.createElement('div'); lb.className = 'plabel' + (i === selected ? '' : ' small');
+        lb.innerHTML = '<b></b><span></span>'; lb.firstChild.textContent = o._no + '.'; lb.lastChild.textContent = o[C.name];
+        const lov = new kakao.maps.CustomOverlay({ position: pos, content: lb, xAnchor: 0, yAnchor: .5, zIndex: i === selected ? 5 : 2 });
+        lov.setMap(map); overlays.push(lov);
+      }
       bounds.extend(pos); any = true;
     }
   });
@@ -329,6 +341,7 @@ function draw(fit){
   }
   if(fit && any) map.setBounds(bounds, 40, 40, 40, 40);
 }
+function zoomLabels(){ return map && map.getLevel() <= CONFIG.LABEL_ZOOM_LEVEL; }
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function select(i, pan){
   selected = i; const o = rows[i]; const s = statusOf(o[C.status]);
@@ -361,6 +374,8 @@ function init(){
   places = new kakao.maps.services.Places();
   $('#q').addEventListener('input', () => draw(false));
   $('#region').addEventListener('change', () => draw(true));
+  let lastZL = zoomLabels();
+  kakao.maps.event.addListener(map, 'zoom_changed', () => { const z = zoomLabels(); if(z !== lastZL){ lastZL = z; draw(false); } });
   $('#refresh').onclick = load;
   $('#toggle').onclick = () => $('#side').classList.toggle('min');
   load();
